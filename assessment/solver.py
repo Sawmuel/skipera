@@ -21,6 +21,10 @@ class GradedSolver(object):
 
     def solve(self):
         state = self.get_state()
+        
+        if state is None:
+            logger.error("Could not retrieve assessment state. The assessment may not be accessible or may require prerequisites.")
+            return
 
         if state["allowedAction"] == "RESUME_DRAFT":
             logger.error("An attempt is already in progress, please abort it manually.")
@@ -63,18 +67,26 @@ class GradedSolver(object):
         """
         Retrieves the current state of the assessment.
         """
-        res = self.session.post(url=GRAPHQL_URL, params={
-            "opname": "QueryState"
-        }, json={
-            "operationName": "QueryState",
-            "variables": {
-                "courseId": self.course_id,
-                "itemId": self.item_id
-            },
-            "query": GET_STATE_QUERY
-        }).json()
+        try:
+            res = self.session.post(url=GRAPHQL_URL, params={
+                "opname": "QueryState"
+            }, json={
+                "operationName": "QueryState",
+                "variables": {
+                    "courseId": self.course_id,
+                    "itemId": self.item_id
+                },
+                "query": GET_STATE_QUERY
+            }).json()
 
-        return res["data"]["SubmissionState"]["queryState"]
+            if "data" in res and "SubmissionState" in res["data"]:
+                return res["data"]["SubmissionState"]["queryState"]
+            else:
+                logger.error(f"Unexpected response format: {res}")
+                return None
+        except Exception as e:
+            logger.error(f"Error retrieving assessment state: {e}")
+            return None
 
     def initiate_attempt(self) -> bool:
         """
