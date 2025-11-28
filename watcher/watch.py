@@ -21,6 +21,9 @@ class Watcher(object):
     def watch_item(self) -> None:
         if self.metadata["can_skip"]:
             logger.debug("Skippable video!")
+            self.start_item()
+            time.sleep(2)  # Wait a bit before ending
+            self.update_progress()
             self.end_item()
         else:
             self.start_item()
@@ -48,20 +51,49 @@ class Watcher(object):
                                 data='{"contentRequestBody":{}}')
 
         if res.status_code != 200:
-            logger.error(f"Couldn't end watching {self.item['name']}")
+            logger.error(f"Couldn't end watching {self.item['name']} - Status: {res.status_code}, Response: {res.text}")
 
     def update_progress(self):
         """
         Updates the watchtime progress of a video.
         """
+        video_duration_ms = self.item["timeCommitment"]  # Duration in milliseconds
+        video_duration = video_duration_ms / 1000  # Convert to seconds
+        
+        # Wait 25% of the video duration
+        wait_time = video_duration * 0.25
+        
+        logger.debug(f"Video duration: {video_duration:.0f}s, waiting {wait_time:.0f}s before marking complete")
+        
+        # First update to show we started watching
         res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
                                    f'{self.metadata["tracking_id"]}',
                                json={
                                    "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',
-                                   "viewedUpTo": self.item["timeCommitment"]
+                                   "viewedUpTo": int(video_duration_ms * 0.3)  # Mark as 30% watched (in ms)
+                               })
+
+        time.sleep(wait_time * 0.3)
+        
+        # Second update at 70%
+        res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
+                                   f'{self.metadata["tracking_id"]}',
+                               json={
+                                   "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',
+                                   "viewedUpTo": int(video_duration_ms * 0.7)  # Mark as 70% watched
+                               })
+        
+        time.sleep(wait_time * 0.3)
+        
+        # Final update to the full duration
+        res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
+                                   f'{self.metadata["tracking_id"]}',
+                               json={
+                                   "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',
+                                   "viewedUpTo": video_duration_ms  # Full duration in ms
                                })
 
         if res.status_code != 204:
-            logger.error(f"Couldn't update progress for {self.item["name"]}")
+            logger.error(f"Couldn't update progress for {self.item['name']}")
         else:
-            time.sleep(5)
+            time.sleep(wait_time * 0.4)  # Wait the remaining time
