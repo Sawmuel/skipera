@@ -5,7 +5,6 @@ GRAPHQL_URL = "https://www.coursera.org/graphql-gateway"
 
 PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_MODEL = "sonar-pro"  # adjust this according to your preference
-PERPLEXITY_API_KEY = "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"
 
 HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -27,4 +26,4 @@ COOKIES = {
 }
 
 # Credentials
-PERPLEXITY_API_KEY = ""
+PERPLEXITY_API_KEY = "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"

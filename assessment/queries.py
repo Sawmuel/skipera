@@ -907,3 +907,21 @@ mutation Submission_StartAttempt($courseId: ID!, $itemId: ID!) {
   }
 }
 """
+
+ABORT_ATTEMPT_QUERY = """
+mutation Submission_DiscardDraft($attemptId: ID!) {
+  Submission_DiscardDraft(input: {attemptId: $attemptId}) {
+    ... on Submission_DiscardDraftSuccess {
+      __typename
+    }
+    ... on Submission_DiscardDraftFailure {
+      errors {
+        errorCode
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+"""

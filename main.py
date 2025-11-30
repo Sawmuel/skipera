@@ -8,7 +8,7 @@ from watcher.watch import Watcher
 
 
 class Skipera(object):
-    def __init__(self, course: str, llm: bool):
+    def __init__(self, course: str, llm: bool, eva: bool):
         self.user_id = None
         self.course_id = None
         self.base_url = config.BASE_URL
@@ -17,6 +17,7 @@ class Skipera(object):
         self.session.cookies.update(config.COOKIES)
         self.course = course
         self.llm = llm
+        self.eva = eva
         if not self.get_userid():
             self.login()
 
@@ -61,13 +62,24 @@ class Skipera(object):
 
         for item in r["linked"]["onDemandCourseMaterialItems.v2"]:
             if item["contentSummary"]["typeName"] == "lecture":
-                logger.info(item["name"])
-                self.watch_item(item, self.get_video_metadata(item["id"]))
+                if not self.eva:  # Skip videos in eva mode
+                    logger.info(item["name"])
+                    self.watch_item(item, self.get_video_metadata(item["id"]))
+                else:
+                    logger.debug(f"Skipping video '{item['name']}' (eva mode - only assessments)")
             elif item["contentSummary"]["typeName"] == "supplement":
-                self.read_item(item["id"])
+                if not self.eva:  # Skip readings in eva mode
+                    self.read_item(item["id"])
+                else:
+                    logger.debug(f"Skipping reading '{item['name']}' (eva mode - only assessments)")
             elif item["contentSummary"]["typeName"] == "ungradedAssignment":
-                logger.info("Skipping ungraded assignment!")
-            elif item["contentSummary"]["typeName"] == "staffGraded" and self.llm:
+                if self.llm or self.eva:
+                    logger.info("Attempting to solve ungraded assessment..")
+                    solver = GradedSolver(self.session, self.course_id, item["id"])
+                    solver.solve()
+                else:
+                    logger.info("Skipping ungraded assignment!")
+            elif item["contentSummary"]["typeName"] == "staffGraded" and (self.llm or self.eva):
                 logger.info("Attempting to solve graded assessment..")
                 solver = GradedSolver(self.session, self.course_id, item["id"])
                 solver.solve()
@@ -98,9 +110,14 @@ class Skipera(object):
 @logger.catch
 @click.command()
 @click.option('--slug', required=True, help="The course slug from the URL")
-@click.option('--llm', is_flag=True, help="Whether to use an LLM to solve graded assignments.")
-def main(slug: str, llm: bool) -> None:
-    skipera = Skipera(slug, llm)
+@click.option('--llm', is_flag=True, help="Whether to use an LLM to solve graded assignments (completes videos + assessments).")
+@click.option('--eva', is_flag=True, help="Only solve graded assessments, skip videos and readings.")
+def main(slug: str, llm: bool, eva: bool) -> None:
+    if eva and llm:
+        logger.warning("Both --llm and --eva flags provided. Using --eva mode (assessments only).")
+        llm = False
+    
+    skipera = Skipera(slug, llm, eva)
     skipera.get_course()
 
 

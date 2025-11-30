@@ -5,7 +5,7 @@ import requests
 from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
 from config import GRAPHQL_URL
 from assessment.queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
-                                GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY)
+                                GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY, ABORT_ATTEMPT_QUERY)
 from loguru import logger
 from llm.connector import PerplexityConnector
 
@@ -27,9 +27,19 @@ class GradedSolver(object):
             return
 
         if state["allowedAction"] == "RESUME_DRAFT":
-            logger.error("An attempt is already in progress, please abort it manually.")
+            logger.warning("An attempt is already in progress, attempting to abort it...")
+            if self.abort_attempt(state):
+                logger.info("Successfully aborted previous attempt, starting new one...")
+                # Retry after aborting
+                state = self.get_state()
+                if state is None or state["allowedAction"] != "START_NEW_ATTEMPT":
+                    logger.error("Could not start new attempt after aborting. Please abort manually in Coursera.")
+                    return
+            else:
+                logger.error("Could not abort attempt automatically. Please abort it manually in Coursera.")
+                return
 
-        elif state["allowedAction"] == "START_NEW_ATTEMPT":
+        if state["allowedAction"] == "START_NEW_ATTEMPT":
             if state["outcome"] is not None:
                 if state["outcome"]["isPassed"]:
                     logger.debug("Already passed!")
@@ -46,6 +56,10 @@ class GradedSolver(object):
                     questions = self.retrieve_questions()
                     connector = PerplexityConnector()
                     answers = connector.get_response(questions)
+                    
+                    if answers is None:
+                        logger.error("Could not get answers from LLM. Skipping this assessment.")
+                        return
 
                     if not self.save_responses(answers["responses"]):
                         logger.error("Could not save responses. Please file an issue.")
@@ -55,8 +69,8 @@ class GradedSolver(object):
                             logger.error("Could not submit the assignment. Please file an issue.")
 
                         else:
-                            logger.debug("Waiting 3 seconds for grading..")
-                            time.sleep(3)  # delay for grading process
+                            logger.debug("Waiting 10 seconds for grading..")
+                            time.sleep(10)  # increased delay for grading process
                             if not self.get_grade():
                                 logger.error("Sorry! Could not pass the assignment, maybe use a better model.")
 
@@ -223,7 +237,39 @@ class GradedSolver(object):
         }).json()
 
         outcome = res["data"]["SubmissionState"]["queryState"]["outcome"]
+        
+        if outcome is None:
+            logger.warning("Could not retrieve grade outcome. The assignment may still be grading.")
+            return False
 
         logger.debug(f"Achieved {outcome['earnedGrade']} grade. Passed? {outcome['isPassed']}")
 
         return outcome['isPassed']
+
+    def abort_attempt(self, state: dict) -> bool:
+        """
+        Aborts an in-progress attempt.
+        """
+        try:
+            in_progress = state["attempts"].get("inProgressAttempt")
+            if not in_progress:
+                return False
+            
+            attempt_id = in_progress["id"]
+            
+            res = self.session.post(url=GRAPHQL_URL, params={
+                "opname": "Submission_DiscardDraft"
+            }, json={
+                "operationName": "Submission_DiscardDraft",
+                "variables": {
+                    "attemptId": attempt_id
+                },
+                "query": ABORT_ATTEMPT_QUERY
+            })
+            
+            if "Submission_DiscardDraftSuccess" in res.text:
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error aborting attempt: {e}")
+            return False
